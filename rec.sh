@@ -1,4 +1,5 @@
-nal work recorder (commands + output as clean text)
+# ============================================================
+#  Terminal work recorder (commands + output as clean text)
 #
 #  Start:   source rec.sh          # must be SOURCED (not ./rec.sh)
 #  Record:  run <command>          # only 'run'-prefixed lines are logged
@@ -42,8 +43,15 @@ rec-help() {
 [Record]
   run lsblk
   run smartctl -a /dev/sdd
-  run bash -c 'storcli /call show all | grep Status'   # quote pipes
   Commands typed without 'run' are NOT logged.
+
+  Pipes, redirects and other shell syntax: QUOTE THE WHOLE COMMAND.
+      run 'nvidia-smi -q | egrep -i "Serial|bus"'
+      run 'storcli /call show all | grep Status'
+  A single quoted argument is interpreted as a command line, so the
+  pipeline runs (and is logged) as one unit. Without the quotes the
+  outer shell splits the pipeline first, and only the part before
+  the first '|' would reach the recorder.
 
 [Check]
   echo "$RECLOG"    current log file path
@@ -72,18 +80,18 @@ EOF
 # they match -> just print help and exit, because the functions would
 # die together with the child shell and starting would be pointless.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-	  echo "WARNING: source this script, do not run it directly:"
-	    echo ""
-	      echo "    source rec.sh"
-	        echo ""
-		  rec-help
-		    exit 0
+  echo "WARNING: source this script, do not run it directly:"
+  echo ""
+  echo "    source rec.sh"
+  echo ""
+  rec-help
+  exit 0
 fi
 
 # ---- --help / -h ----
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-	  rec-help
-	    return 0
+  rec-help
+  return 0
 fi
 
 # ---- choose log file: new vs resume ----
@@ -98,49 +106,62 @@ __REC_MODE="ask"
 [ "$1" = "-r" ] && __REC_MODE="resume"
 
 if [ "$__REC_MODE" = "ask" ] && [ -n "$__REC_LATEST" ]; then
-	  printf 'Previous log found: %s\n' "$__REC_LATEST"
-	    printf 'Resume it, or start a new one? [r/N] '
-	      read -r __REC_ANS
-	        case "$__REC_ANS" in
-			    r|R) __REC_MODE="resume" ;;
-			        *)   __REC_MODE="new" ;;
-				  esac
+  printf 'Previous log found: %s\n' "$__REC_LATEST"
+  printf 'Resume it, or start a new one? [r/N] '
+  read -r __REC_ANS
+  case "$__REC_ANS" in
+    r|R) __REC_MODE="resume" ;;
+    *)   __REC_MODE="new" ;;
+  esac
 fi
 
 if [ "$__REC_MODE" = "resume" ] && [ -n "$__REC_LATEST" ]; then
-	  export RECLOG="$__REC_LATEST"
-	    if __REC_TTY="$(tty)"; then :; else __REC_TTY="n/a"; fi
-	      printf '\n##### session resumed: %s (%s) #####\n' \
-		               "$(date '+%Y-%m-%d %H:%M:%S')" "$__REC_TTY" >> "$RECLOG"
-	        unset __REC_TTY
-	else
-		  export RECLOG="$REC_DIR/$(date +%Y%m%d_%H%M%S).log"
+  export RECLOG="$__REC_LATEST"
+  if __REC_TTY="$(tty)"; then :; else __REC_TTY="n/a"; fi
+  printf '\n##### session resumed: %s (%s) #####\n' \
+         "$(date '+%Y-%m-%d %H:%M:%S')" "$__REC_TTY" >> "$RECLOG"
+  unset __REC_TTY
+else
+  export RECLOG="$REC_DIR/$(date +%Y%m%d_%H%M%S).log"
 fi
 
 unset __REC_MODE __REC_LATEST __REC_ANS
 
 # ---- output stripper: ansi2txt if present, else passthrough ----
 if command -v ansi2txt >/dev/null 2>&1; then
-	  __REC_STRIP() { ansi2txt; }
-  else
-	    __REC_STRIP() { cat; }   # fallback when colorized-logs is not installed
+  __REC_STRIP() { ansi2txt; }
+else
+  __REC_STRIP() { cat; }   # fallback when colorized-logs is not installed
 fi
+
+# ---- command dispatcher ----
+# A single argument is treated as a command LINE and evaluated, so
+# quoted pipelines/redirects work: run 'cmd | grep x'. Bare multi-word
+# invocations (run smartctl -a /dev/sdd) keep going through 'command',
+# which needs no quoting and cannot re-split the arguments.
+__REC_EXEC() {
+  if [ "$#" -eq 1 ]; then
+    eval "$1"
+  else
+    command "$@"
+  fi
+}
 
 # ---- record function ----
 run() {
-	  {
-		      printf '\n$ %s\n' "$*"           # command: straight from args (never corrupted)
-		          command "$@" 2>&1 | __REC_STRIP  # output: color/control chars stripped
-			    } | tee -a "$RECLOG"               # screen + file at the same time
-		    }
+  {
+    printf '\n$ %s\n' "$*"             # command: straight from args (never corrupted)
+    __REC_EXEC "$@" 2>&1 | __REC_STRIP # output: color/control chars stripped
+  } | tee -a "$RECLOG"                 # screen + file at the same time
+}
 
-		    # ---- teardown (no exit / Ctrl+D needed) ----
-		    rec-off() {
-		      unset RECLOG
-		        unset -f run __REC_STRIP rec-help rec-off
-			  echo "recorder off (log files are kept on disk)"
-		  }
+# ---- teardown (no exit / Ctrl+D needed) ----
+rec-off() {
+  unset RECLOG
+  unset -f run __REC_EXEC __REC_STRIP rec-help rec-off
+  echo "recorder off (log files are kept on disk)"
+}
 
-		  echo "recording -> $RECLOG"
-		  echo "usage: run <command>    (details: rec-help)"
-		  echo "stop:  rec-off"
+echo "recording -> $RECLOG"
+echo "usage: run <command>    (details: rec-help)"
+echo "stop:  rec-off"
