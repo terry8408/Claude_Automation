@@ -53,6 +53,27 @@ rec-help() {
   outer shell splits the pipeline first, and only the part before
   the first '|' would reach the recorder.
 
+[Quoting rule -- the one thing to remember]
+  Inside '...' use "..." for the inner quotes, never '...' again:
+      run 'nvidia-smi -q | egrep -i "Serial|bus"'    GOOD
+      run "nvidia-smi -q | egrep -i 'Serial|bus'"    GOOD
+      run 'nvidia-smi -q | egrep -i 'Serial|bus''    BROKEN
+  The broken line is not a recorder problem and cannot be fixed here:
+  the shell cannot nest single quotes, so it ends the first quote at
+  the second ', leaves the | as a real pipe, and tries to run 'bus' as
+  a separate command -- all before 'run' is ever called. Symptom:
+  "Command 'bus' not found" plus a truncated line in the log.
+  If you must keep single quotes inside single quotes, close and
+  re-open them:  run 'egrep -i '\''Serial|bus'\'' file'
+
+  Note that "..." lets the OUTER shell expand $VAR and `cmd` before
+  the recorder sees them. Prefer '...' when you want the command
+  logged exactly as typed.
+
+  A command whose PATH contains spaces needs inner quotes too, since a
+  single argument is parsed as a command line:
+      run '"/opt/my tool.sh" --flag'
+
 [Check]
   echo "$RECLOG"    current log file path
   cat  "$RECLOG"    show everything recorded so far
@@ -147,10 +168,34 @@ __REC_EXEC() {
   fi
 }
 
+# ---- command formatter (for the log line) ----
+# With several arguments, "$*" would flatten them and silently drop the
+# quoting: run grep -c "Chassis Serial" f would be logged as
+# `grep -c Chassis Serial f`, which means something else when replayed.
+# Re-quote only the arguments that need it, so the logged line stays
+# both readable and copy-paste accurate.
+__REC_FMT() {
+  local out= a
+  for a in "$@"; do
+    case $a in
+      '')                       out="$out ''" ;;
+      *[!A-Za-z0-9_.,:=@%+/-]*) out="$out $(printf '%q' "$a")" ;;
+      *)                        out="$out $a" ;;
+    esac
+  done
+  printf '%s' "${out# }"
+}
+
 # ---- record function ----
 run() {
+  local __rec_line
+  if [ "$#" -eq 1 ]; then
+    __rec_line="$1"              # already a command line: log it verbatim
+  else
+    __rec_line="$(__REC_FMT "$@")"
+  fi
   {
-    printf '\n$ %s\n' "$*"             # command: straight from args (never corrupted)
+    printf '\n$ %s\n' "$__rec_line"    # command: straight from args (never corrupted)
     __REC_EXEC "$@" 2>&1 | __REC_STRIP # output: color/control chars stripped
   } | tee -a "$RECLOG"                 # screen + file at the same time
 }
@@ -158,7 +203,7 @@ run() {
 # ---- teardown (no exit / Ctrl+D needed) ----
 rec-off() {
   unset RECLOG
-  unset -f run __REC_EXEC __REC_STRIP rec-help rec-off
+  unset -f run __REC_EXEC __REC_FMT __REC_STRIP rec-help rec-off
   echo "recorder off (log files are kept on disk)"
 }
 
