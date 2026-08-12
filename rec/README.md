@@ -17,34 +17,54 @@
 
 ---
 
-## 설치 (권장) — 한 번만 넣으면 계속 최신
+## 설치
 
-각 머신의 `~/.bashrc`에 아래 함수를 **한 번만** 넣어두세요.
+머신마다 **한 줄만** 실행하면 끝납니다.
 
 ```bash
-rec-on() {
-  local u=https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/rec.sh
-  local c=~/.cache/rec/rec.sh
-  mkdir -p "${c%/*}"
-  if curl -fsSL --max-time 5 "$u" -o "$c.tmp" 2>/dev/null; then
-    mv "$c.tmp" "$c"
-  else
-    rm -f "$c.tmp"
-    [ -f "$c" ] && echo "rec: offline, using cached copy" >&2
-  fi
-  [ -f "$c" ] || { echo "rec: no network and no cache" >&2; return 1; }
-  source "$c" "$@"
-}
+curl -fsSL https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/install.sh | bash
+source ~/.bashrc              # 또는 다시 로그인
+rec-on
 ```
 
-**이 줄은 앞으로 절대 바뀌지 않습니다.** rec.sh를 아무리 고쳐도 각 머신은
-다음 `rec-on` 때 자동으로 최신 버전을 씁니다. 즉 **복사본을 일일이
-업데이트할 일이 없어집니다.**
+`install.sh`는 `~/.bashrc`에 `rec-on` 함수를 심습니다. 여러 번 실행해도
+중복 추가되지 않으므로(기존 블록을 교체) 그대로 재실행하시면 됩니다.
 
-받아온 파일은 `~/.cache/rec/rec.sh`에 캐시되고, 네트워크가 죽어 있으면
-캐시본으로 동작합니다. 장애 대응 중에 GitHub이 안 열리는 상황에서도 쓸 수
-있어야 하기 때문입니다. 응답 없는 네트워크에서는 5초 후 포기하고 캐시로
-넘어가므로 멈춰 있지 않습니다.
+| 옵션 | 동작 |
+| --- | --- |
+| (없음) | `~/.bashrc`에 설치 — 해당 계정만 |
+| `--system` | `/etc/profile.d/rec.sh`에 설치 — 전체 계정 |
+| `--uninstall` | `rec-on`과 캐시 제거. **작업 로그는 보존** |
+| `--purge` | `--uninstall` + 로그까지 삭제 (개수 확인 후 y/N) |
+| `--help` | 도움말 |
+
+옵션을 붙일 때는 `bash -s --` 뒤에 씁니다.
+
+```bash
+curl -fsSL .../install.sh | bash -s -- --uninstall
+```
+
+### `rec-on`이 하는 일
+
+기존의 `source rec.sh`를 대체하는 **진입점**입니다. 순서대로:
+
+1. GitHub에서 최신 `rec.sh`를 받아옴 (`curl`)
+2. `~/.cache/rec/rec.sh`에 캐시로 저장
+3. 네트워크가 죽어 있으면 캐시본을 대신 사용
+4. 그 파일을 `source` 해서 `run` / `rec-off` / `rec-help`를 현재 셸에 정의
+
+**`~/.bashrc`에 들어가는 이 블록은 앞으로 바뀌지 않습니다.** rec.sh를 아무리
+고쳐도 각 머신은 다음 `rec-on` 때 자동으로 최신을 씁니다. 즉 **복사본을
+일일이 업데이트할 일이 없어집니다.**
+
+캐시 폴백이 있는 이유는, 이 도구가 보통 **뭔가 고장난 상황에서** 필요하기
+때문입니다. GitHub이 안 열려도 한 번이라도 받아둔 적이 있으면 동작합니다.
+응답 없는 네트워크에서는 5초 후 포기하므로 멈춰 있지 않습니다.
+
+> 참고: `raw.githubusercontent.com`은 5분간 캐시되므로, rec.sh를 고친 뒤
+> 서버에 반영되기까지 최대 5분 걸립니다.
+
+### 사용
 
 ```bash
 rec-on                        # 이전 로그가 있으면 이어쓸지 물어봄
@@ -56,6 +76,53 @@ run 'nvidia-smi -q | egrep -i "Serial|Bus"'
 cat "$RECLOG"                 # 지금까지 기록된 내용 전체
 rec-off                       # 기록 중지 (로그 파일은 그대로 남습니다)
 ```
+
+### `rec-on`이 어느 셸에서 뜨는가
+
+`~/.bashrc`에 설치하면 **대화형 셸이면 거의 다** 뜹니다. `--system`
+(`/etc/profile.d`)은 **로그인 셸에서만** 읽힙니다.
+
+| 상황 | 로그인 셸? | `~/.bashrc` | `--system` |
+| --- | --- | --- | --- |
+| 콘솔(tty) 로그인 | O | 동작 | 동작 |
+| SSH 접속 | O | 동작 | 동작 |
+| `su - user`, `sudo -i` | O | 동작 | 동작 |
+| 로그인 후 `bash` 입력 | X | 동작 | **안 됨** |
+| `su user` (하이픈 없이) | X | 동작 | **안 됨** |
+| `ssh host '명령'` (비대화형) | X | 안 됨 | 안 됨 |
+
+서버를 콘솔이나 SSH로만 쓰신다면 두 방식 모두 커버되므로, 한 장비를 여러
+계정이 쓸 때만 `--system`을 고려하시면 됩니다.
+
+## 신규 OS에 세팅할 때
+
+최소 설치 이미지에는 `curl`이 없을 수 있습니다.
+
+```bash
+apt install -y curl                  # 필수
+apt install -y colorized-logs        # 선택 (아래 설명)
+curl -fsSL https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/install.sh | bash
+source ~/.bashrc
+rec-on
+```
+
+## 기존에 rec.sh를 복사해 쓰던 환경에서
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/install.sh | bash
+source ~/.bashrc
+rec-on                               # 'rec.sh v1.0.0' 이 뜨면 정상
+```
+
+그리고 **예전에 복사해둔 rec.sh는 지우세요.** 습관적으로 그걸 `source` 하면
+파이프라인 버그가 있는 구버전을 쓰게 됩니다.
+
+```bash
+ls ~/rec.sh ~/*/rec.sh 2>/dev/null   # 찾아서 삭제
+```
+
+기존 로그(`~/rec_logs/`)는 **그대로 유지**되고 `rec-on -r`로 이어쓸 수
+있습니다. 다만 예전 로그에는 버전 헤더가 없고, 앞으로 생성되는 것부터 찍힙니다.
 
 ## 그 밖의 설치 방법
 
@@ -239,16 +306,23 @@ run '"/opt/my tool.sh" --flag'
 
 ## 출력 정리
 
-프로그램 출력에서 ANSI 색상·제어 문자를 제거해 로그에 남깁니다. 티켓이나
-보고서에 붙여넣어도 깨지지 않게 하기 위해서입니다.
+많은 명령이 컬러로 출력합니다 (`ls`, `grep --color`, `systemctl`, 일부 벤더
+툴). 터미널에서는 예쁘지만 **그 출력을 파일로 저장하면 제어문자가 그대로
+박힙니다.**
 
-`ansi2txt`가 있으면 그것을 사용합니다.
+```
+터미널 화면:   Serial OK / Bus FAIL          ← 초록/빨강으로 보임
+파일 속 실제:  Serial ^[[0;32mOK^[[0m / Bus ^[[0;31mFAIL^[[0m
+```
+
+RMA 로그를 티켓에 붙여넣거나 제조사에 메일로 보낼 때 저 `^[[0;32m`들이 그대로
+따라갑니다. `ansi2txt`가 그걸 걸러내 깨끗한 텍스트만 남깁니다.
 
 ```bash
 apt install colorized-logs      # Debian / Ubuntu
 ```
 
-없으면 출력을 그대로 통과시키는 방식으로 동작합니다. 기능은 다 되고,
+**필수는 아닙니다.** 없으면 출력을 그대로 통과시키므로 기능은 전부 동작하고,
 로그에 이스케이프 시퀀스가 남을 뿐입니다.
 
 출력은 화면과 파일에 **동시에** 기록되므로(`tee -a`), 결과를 실시간으로

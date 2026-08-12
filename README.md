@@ -14,10 +14,12 @@ cd Claude_Automation
 명령어와 출력을 깨끗한 텍스트 로그로 남깁니다. RMA 조사처럼 "무엇을
 확인했는지" 증거로 남겨야 하는 작업용입니다.
 
-`~/.bashrc`에 `rec-on` 함수를 한 번 넣어두면 이후 자동으로 최신 버전을
-씁니다 (설치법은 [rec/README.md](rec/README.md) 참고).
+머신마다 한 줄로 설치하면 이후 자동으로 최신 버전을 씁니다.
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/install.sh | bash
+source ~/.bashrc
+
 rec-on
 run 'nvidia-smi -q | egrep -i "Serial|Bus"'
 ```

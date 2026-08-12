@@ -16,33 +16,55 @@ keeping. The log ends up in `$HOME/rec_logs/YYYYmmdd_HHMMSS.log`.
 
 ---
 
-## Install once, stay current
+## Install
 
-Put this function in `~/.bashrc` on each machine — once.
+One line per machine:
 
 ```bash
-rec-on() {
-  local u=https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/rec.sh
-  local c=~/.cache/rec/rec.sh
-  mkdir -p "${c%/*}"
-  if curl -fsSL --max-time 5 "$u" -o "$c.tmp" 2>/dev/null; then
-    mv "$c.tmp" "$c"
-  else
-    rm -f "$c.tmp"
-    [ -f "$c" ] && echo "rec: offline, using cached copy" >&2
-  fi
-  [ -f "$c" ] || { echo "rec: no network and no cache" >&2; return 1; }
-  source "$c" "$@"
-}
+curl -fsSL https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/install.sh | bash
+source ~/.bashrc              # or just log in again
+rec-on
 ```
 
-**That line never changes**, so every session picks up the current
-rec.sh by itself — there are no copies left to keep in sync.
+`install.sh` writes a `rec-on` function into `~/.bashrc`. Re-running it
+replaces the existing block rather than appending, so it is safe to run
+again at any time.
 
-The fetched file is cached at `~/.cache/rec/rec.sh` and used as a
-fallback when the network is unreachable, because this tool is often
-needed exactly when something is broken. An unresponsive network is
-given up on after 5 seconds rather than hanging.
+| Option | Effect |
+| --- | --- |
+| (none) | install into `~/.bashrc` — this user only |
+| `--system` | install into `/etc/profile.d/rec.sh` — all users |
+| `--uninstall` | remove `rec-on` and the cache. **Work logs are kept** |
+| `--purge` | `--uninstall` plus deleting the logs (counts them, asks y/N) |
+| `--help` | usage |
+
+Pass options after `bash -s --`:
+
+```bash
+curl -fsSL .../install.sh | bash -s -- --uninstall
+```
+
+### What rec-on does
+
+It replaces `source rec.sh` as the entry point. In order, it:
+
+1. fetches the current `rec.sh` from GitHub (`curl`)
+2. caches it at `~/.cache/rec/rec.sh`
+3. falls back to that cache when the network is unreachable
+4. sources it, defining `run` / `rec-off` / `rec-help` in your shell
+
+**The block installed into `~/.bashrc` never changes**, so every session
+picks up the current rec.sh by itself — there are no copies left to keep
+in sync.
+
+The cache fallback exists because this tool is usually wanted *while
+something is already broken*. An unresponsive network is given up on
+after 5 seconds rather than hanging.
+
+> Note: `raw.githubusercontent.com` caches for 5 minutes, so a change to
+> rec.sh takes up to that long to reach machines.
+
+### Usage
 
 ```bash
 rec-on                        # asks resume-or-new if a log exists
@@ -54,6 +76,24 @@ run 'nvidia-smi -q | egrep -i "Serial|Bus"'
 cat "$RECLOG"                 # everything recorded so far
 rec-off                       # stop recording (log files are kept)
 ```
+
+### Which shells see rec-on
+
+Installed into `~/.bashrc` it is available in essentially any
+interactive shell. `--system` (`/etc/profile.d`) is read by **login
+shells only**.
+
+| Situation | Login shell? | `~/.bashrc` | `--system` |
+| --- | --- | --- | --- |
+| Console (tty) login | yes | works | works |
+| SSH session | yes | works | works |
+| `su - user`, `sudo -i` | yes | works | works |
+| `bash` inside an existing session | no | works | **no** |
+| `su user` (no hyphen) | no | works | **no** |
+| `ssh host 'cmd'` (non-interactive) | no | no | no |
+
+For machines reached only by console or SSH both cover everything, so
+`--system` is worth it only when several accounts share a machine.
 
 ## Other ways to install
 
@@ -244,17 +284,24 @@ All of the following are recorded and executed correctly:
 
 ## Output cleaning
 
-Program output is stripped of ANSI colour and control characters, so the
-log stays readable when pasted into a ticket or a report.
+Plenty of commands emit colour (`ls`, `grep --color`, `systemctl`, some
+vendor tools). It looks fine on screen, but **saving that output to a
+file embeds the control characters**:
 
-Stripping uses `ansi2txt` when available:
+```
+on screen:  Serial OK / Bus FAIL           <- green / red
+in file:    Serial ^[[0;32mOK^[[0m / Bus ^[[0;31mFAIL^[[0m
+```
+
+Those `^[[0;32m` sequences follow the text into a ticket or an email to
+the manufacturer. `ansi2txt` strips them, leaving clean text:
 
 ```bash
 apt install colorized-logs      # Debian / Ubuntu
 ```
 
-Without it the script falls back to passing output through unchanged —
-everything still works, the log just keeps any escape sequences.
+**It is optional.** Without it the script passes output through
+unchanged — everything still works, the log just keeps the escapes.
 
 Output is written to the screen and the file at the same time (`tee -a`),
 so you see results live while they are recorded.
