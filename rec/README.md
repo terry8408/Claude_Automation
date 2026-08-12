@@ -17,12 +17,38 @@
 
 ---
 
-## 빠른 시작
+## 설치 (권장) — 한 번만 넣으면 계속 최신
+
+각 머신의 `~/.bashrc`에 아래 함수를 **한 번만** 넣어두세요.
 
 ```bash
-git clone https://github.com/terry8408/Claude_Automation.git
-cd Claude_Automation/rec
-source rec.sh                 # 실행(./rec.sh)이 아니라 source 해야 합니다
+rec-on() {
+  local u=https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/rec.sh
+  local c=~/.cache/rec/rec.sh
+  mkdir -p "${c%/*}"
+  if curl -fsSL --max-time 5 "$u" -o "$c.tmp" 2>/dev/null; then
+    mv "$c.tmp" "$c"
+  else
+    rm -f "$c.tmp"
+    [ -f "$c" ] && echo "rec: offline, using cached copy" >&2
+  fi
+  [ -f "$c" ] || { echo "rec: no network and no cache" >&2; return 1; }
+  source "$c" "$@"
+}
+```
+
+**이 줄은 앞으로 절대 바뀌지 않습니다.** rec.sh를 아무리 고쳐도 각 머신은
+다음 `rec-on` 때 자동으로 최신 버전을 씁니다. 즉 **복사본을 일일이
+업데이트할 일이 없어집니다.**
+
+받아온 파일은 `~/.cache/rec/rec.sh`에 캐시되고, 네트워크가 죽어 있으면
+캐시본으로 동작합니다. 장애 대응 중에 GitHub이 안 열리는 상황에서도 쓸 수
+있어야 하기 때문입니다. 응답 없는 네트워크에서는 5초 후 포기하고 캐시로
+넘어가므로 멈춰 있지 않습니다.
+
+```bash
+rec-on                        # 이전 로그가 있으면 이어쓸지 물어봄
+rec-on -r                     # 이전 로그에 바로 이어쓰기
 
 run nvidia-smi -L
 run 'nvidia-smi -q | egrep -i "Serial|Bus"'
@@ -30,6 +56,38 @@ run 'nvidia-smi -q | egrep -i "Serial|Bus"'
 cat "$RECLOG"                 # 지금까지 기록된 내용 전체
 rec-off                       # 기록 중지 (로그 파일은 그대로 남습니다)
 ```
+
+## 그 밖의 설치 방법
+
+**git clone** — 여러 도구를 같이 쓰거나 소스를 직접 두고 볼 때.
+
+```bash
+git clone https://github.com/terry8408/Claude_Automation.git
+cd Claude_Automation/rec
+source rec.sh                 # 실행(./rec.sh)이 아니라 source 해야 합니다
+```
+
+**단일 파일 복사** — 폐쇄망 등 네트워크가 없는 장비.
+
+```bash
+scp rec.sh user@server:~/     # 서버에서: source ~/rec.sh
+```
+
+rec.sh는 **파일 하나만 있어도 완결되게** 만들어져 있습니다. 도움말(`rec-help`)도
+스크립트에 내장돼 있어 이 문서 없이도 사용법을 볼 수 있습니다.
+
+## 버전 확인
+
+로그 헤더에 **어느 버전이 만든 기록인지** 찍힙니다.
+
+```
+##### rec.sh v1.0.0 | session started: 2026-08-12 12:41:00 (/dev/tty1) #####
+```
+
+자동 업데이트 방식이라 시간이 지나면 "이 로그가 어떤 동작의 산출물인지"가
+흐려질 수 있는데, 이 헤더가 그걸 막아줍니다. 이어쓰기(`-r`) 중간에 버전이
+올라가면 그 지점에 새 헤더가 찍혀 경계가 남습니다. 현재 버전은
+`$REC_VERSION`에도 들어 있습니다.
 
 ---
 

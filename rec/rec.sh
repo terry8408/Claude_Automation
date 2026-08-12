@@ -16,6 +16,12 @@
 #  UTF-8 text renders fine over an SSH client such as MobaXterm.
 # ============================================================
 
+# Bump this whenever the recording behaviour changes. It is stamped into
+# every log header, so a log always states which version produced it --
+# necessary because installations fetch this file from main and update
+# themselves silently.
+REC_VERSION="1.0.0"
+
 # ---- help ----
 rec-help() {
   cat <<'EOF'
@@ -31,6 +37,34 @@ rec-help() {
   source rec.sh -r     always RESUME the latest log (no prompt)
   * Running ./rec.sh directly only prints this help: the functions
     would be defined in a child shell and vanish when it exits.
+
+[Install once, stay current]
+  Put this in ~/.bashrc on each machine. The line never changes, so
+  every session picks up the latest rec.sh by itself -- no copies to
+  keep in sync. It caches the file and falls back to the cache when
+  the network is down, which matters during an outage.
+
+    rec-on() {
+      local u=https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/rec.sh
+      local c=~/.cache/rec/rec.sh
+      mkdir -p "${c%/*}"
+      if curl -fsSL --max-time 5 "$u" -o "$c.tmp" 2>/dev/null; then
+        mv "$c.tmp" "$c"
+      else
+        rm -f "$c.tmp"
+        [ -f "$c" ] && echo "rec: offline, using cached copy" >&2
+      fi
+      [ -f "$c" ] || { echo "rec: no network and no cache" >&2; return 1; }
+      source "$c" "$@"
+    }
+
+  Then use 'rec-on' / 'rec-on -r' instead of 'source rec.sh'.
+
+[Version]
+  Every log header records the version that produced it:
+      ##### rec.sh v1.0.0 | session started: ... (/dev/tty1) #####
+  Since installs update themselves, this is how you tell later which
+  behaviour a given log reflects. Also in $REC_VERSION.
 
 [Resume after reboot]
   A reboot starts a fresh shell, so the functions are gone and you
@@ -138,15 +172,20 @@ fi
 
 if [ "$__REC_MODE" = "resume" ] && [ -n "$__REC_LATEST" ]; then
   export RECLOG="$__REC_LATEST"
-  if __REC_TTY="$(tty)"; then :; else __REC_TTY="n/a"; fi
-  printf '\n##### session resumed: %s (%s) #####\n' \
-         "$(date '+%Y-%m-%d %H:%M:%S')" "$__REC_TTY" >> "$RECLOG"
-  unset __REC_TTY
+  __REC_EVENT="session resumed"
 else
   export RECLOG="$REC_DIR/$(date +%Y%m%d_%H%M%S).log"
+  __REC_EVENT="session started"
 fi
 
-unset __REC_MODE __REC_LATEST __REC_ANS
+# Header on both paths: a resumed log that was updated in between then
+# shows the version change at the exact point it happened.
+if __REC_TTY="$(tty)"; then :; else __REC_TTY="n/a"; fi
+printf '\n##### rec.sh v%s | %s: %s (%s) #####\n' \
+       "$REC_VERSION" "$__REC_EVENT" "$(date '+%Y-%m-%d %H:%M:%S')" "$__REC_TTY" \
+       >> "$RECLOG"
+
+unset __REC_MODE __REC_LATEST __REC_ANS __REC_TTY __REC_EVENT
 
 # ---- output stripper: ansi2txt if present, else passthrough ----
 if command -v ansi2txt >/dev/null 2>&1; then
@@ -202,11 +241,12 @@ run() {
 
 # ---- teardown (no exit / Ctrl+D needed) ----
 rec-off() {
-  unset RECLOG
+  unset RECLOG REC_VERSION
   unset -f run __REC_EXEC __REC_FMT __REC_STRIP rec-help rec-off
   echo "recorder off (log files are kept on disk)"
 }
 
+echo "rec.sh v$REC_VERSION"
 echo "recording -> $RECLOG"
 echo "usage: run <command>    (details: rec-help)"
 echo "stop:  rec-off"

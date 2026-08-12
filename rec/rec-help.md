@@ -16,12 +16,37 @@ keeping. The log ends up in `$HOME/rec_logs/YYYYmmdd_HHMMSS.log`.
 
 ---
 
-## Quick start
+## Install once, stay current
+
+Put this function in `~/.bashrc` on each machine — once.
 
 ```bash
-git clone https://github.com/terry8408/Claude_Automation.git
-cd Claude_Automation/rec
-source rec.sh                 # note: SOURCE it, do not execute it
+rec-on() {
+  local u=https://raw.githubusercontent.com/terry8408/Claude_Automation/main/rec/rec.sh
+  local c=~/.cache/rec/rec.sh
+  mkdir -p "${c%/*}"
+  if curl -fsSL --max-time 5 "$u" -o "$c.tmp" 2>/dev/null; then
+    mv "$c.tmp" "$c"
+  else
+    rm -f "$c.tmp"
+    [ -f "$c" ] && echo "rec: offline, using cached copy" >&2
+  fi
+  [ -f "$c" ] || { echo "rec: no network and no cache" >&2; return 1; }
+  source "$c" "$@"
+}
+```
+
+**That line never changes**, so every session picks up the current
+rec.sh by itself — there are no copies left to keep in sync.
+
+The fetched file is cached at `~/.cache/rec/rec.sh` and used as a
+fallback when the network is unreachable, because this tool is often
+needed exactly when something is broken. An unresponsive network is
+given up on after 5 seconds rather than hanging.
+
+```bash
+rec-on                        # asks resume-or-new if a log exists
+rec-on -r                     # resume the latest log straight away
 
 run nvidia-smi -L
 run 'nvidia-smi -q | egrep -i "Serial|Bus"'
@@ -29,6 +54,41 @@ run 'nvidia-smi -q | egrep -i "Serial|Bus"'
 cat "$RECLOG"                 # everything recorded so far
 rec-off                       # stop recording (log files are kept)
 ```
+
+## Other ways to install
+
+**git clone** — when you want the source alongside the other tools:
+
+```bash
+git clone https://github.com/terry8408/Claude_Automation.git
+cd Claude_Automation/rec
+source rec.sh                 # note: SOURCE it, do not execute it
+```
+
+**Single file** — for air-gapped machines:
+
+```bash
+scp rec.sh user@server:~/     # then, on the server: source ~/rec.sh
+```
+
+rec.sh is deliberately self-contained: one file is enough, and the
+help text is embedded so `rec-help` works without these documents.
+
+## Versioning
+
+Every log header records the version that produced it:
+
+```
+##### rec.sh v1.0.0 | session started: 2026-08-12 12:41:00 (/dev/tty1) #####
+```
+
+Installations update themselves, so without this you could not tell
+later which behaviour a given log reflects. Resuming a log (`-r`) after
+an update writes a fresh header, leaving the version boundary visible
+at the exact point it changed. Also available in `$REC_VERSION`.
+
+`REC_VERSION` near the top of rec.sh must be bumped whenever recording
+behaviour changes — that is what makes the stamp meaningful.
 
 ---
 
